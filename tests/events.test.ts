@@ -1,7 +1,7 @@
 import request from "supertest";
 import app from "../src/app";
 
-describe("POST /events", () => {
+describe("Calendar Domain API", () => {
   it("should create a new event and correctly calculate the end date", async () => {
     const start = new Date();
     const duration = 2; // Duration in days
@@ -46,5 +46,25 @@ describe("POST /events", () => {
       "error",
       "Event overlaps with an existing event."
     );
+  });
+
+  it("should list all events", async () => {
+    const response = await request(app).get("/events");
+    expect(response.statusCode).toBe(200);
+    expect(Array.isArray(response.body)).toBeTruthy();
+    expect(response.body.length).toBeGreaterThan(0);
+  });
+
+  it("should list events within a specific date range", async () => {
+    const startDate = new Date();
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + 3);
+
+    const response = await request(app).get(
+      `/events?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
+    );
+    expect(response.statusCode).toBe(200);
+    expect(Array.isArray(response.body)).toBeTruthy();
+    expect(response.body.length).toBeGreaterThan(0);
   });
 });

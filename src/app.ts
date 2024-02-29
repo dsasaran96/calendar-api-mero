@@ -41,4 +41,23 @@ app.post("/events", (req: Request, res: Response) => {
   res.status(201).send(newEvent);
 });
 
+app.get("/events", (req: Request, res: Response) => {
+  const { start, end } = req.query;
+  let filteredEvents = events;
+
+  if (start || end) {
+    const startDate = start ? new Date(start as string) : new Date(0);
+    const endDate = end ? new Date(end as string) : new Date();
+
+    filteredEvents = events.filter(
+      (event) =>
+        (event.duration.start >= startDate &&
+          event.duration.start <= endDate) ||
+        (event.duration.end >= startDate && event.duration.end <= endDate)
+    );
+  }
+
+  res.json(filteredEvents);
+});
+
 export default app;
