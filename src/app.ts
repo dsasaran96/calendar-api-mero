@@ -60,4 +60,41 @@ app.get("/events", (req: Request, res: Response) => {
   res.json(filteredEvents);
 });
 
+app.put("/events/:id", (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, start, duration, allowOverlap } = req.body;
+  const eventIndex = events.findIndex((event) => event.id === id);
+
+  if (eventIndex === -1) {
+    return res.status(404).send({ error: "Event not found." });
+  }
+
+  const updatedStartDate = new Date(start);
+  const updatedEndDate = addDays(updatedStartDate, duration);
+  if (!allowOverlap) {
+    const overlapExists = events.some(
+      (event, index) =>
+        index !== eventIndex &&
+        ((updatedStartDate < event.duration.end &&
+          updatedEndDate > event.duration.start) ||
+          (updatedEndDate > event.duration.start &&
+            updatedStartDate < event.duration.end))
+    );
+
+    if (overlapExists) {
+      return res
+        .status(400)
+        .send({ error: "Updating event overlaps with an existing event." });
+    }
+  }
+
+  events[eventIndex] = {
+    ...events[eventIndex],
+    title,
+    duration: { start: updatedStartDate, end: updatedEndDate },
+  };
+
+  res.json(events[eventIndex]);
+});
+
 export default app;

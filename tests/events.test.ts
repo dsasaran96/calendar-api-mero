@@ -2,6 +2,8 @@ import request from "supertest";
 import app from "../src/app";
 
 describe("Calendar Domain API", () => {
+  let eventId: string;
+
   it("should create a new event and correctly calculate the end date", async () => {
     const start = new Date();
     const duration = 2; // Duration in days
@@ -21,6 +23,7 @@ describe("Calendar Domain API", () => {
     const expectedEndDate = new Date(start);
     expectedEndDate.setDate(expectedEndDate.getDate() + duration);
     expect(new Date(response.body.duration.end)).toEqual(expectedEndDate);
+    eventId = response.body.id;
   });
 
   it("should reject creating an overlapping event when not allowed", async () => {
@@ -66,5 +69,27 @@ describe("Calendar Domain API", () => {
     expect(response.statusCode).toBe(200);
     expect(Array.isArray(response.body)).toBeTruthy();
     expect(response.body.length).toBeGreaterThan(0);
+  });
+
+  it("should update an event", async () => {
+    const newTitle = "Updated Event";
+    const response = await request(app).put(`/events/${eventId}`).send({
+      title: newTitle,
+      start: new Date().toISOString(),
+      duration: 2,
+      allowOverlap: true,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toHaveProperty("title", newTitle);
+  });
+
+  it("should not find the event to update", async () => {
+    const response = await request(app).put("/events/nonexistent-id").send({
+      title: "Ghost Event",
+      start: new Date().toISOString(),
+      duration: 1,
+      allowOverlap: false,
+    });
+    expect(response.statusCode).toBe(404);
   });
 });
