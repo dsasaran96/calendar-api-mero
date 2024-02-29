@@ -7,36 +7,38 @@ app.use(express.json());
 
 const events: CalendarEvent[] = [];
 
-function isEventOverlapping(
-  newEvent: Duration,
-  allowOverlap: boolean = false
-): boolean {
-  return events.some(
-    (event) =>
-      !allowOverlap &&
-      ((newEvent.start < event.duration.end &&
-        newEvent.start >= event.duration.start) ||
-        (newEvent.end > event.duration.start &&
-          newEvent.end <= event.duration.end) ||
-        (newEvent.start <= event.duration.start &&
-          newEvent.end >= event.duration.end))
-  );
+function addDays(date: Date, days: number): Date {
+  const newDate = new Date(date);
+  newDate.setDate(newDate.getDate() + days);
+  return newDate;
 }
 
 app.post("/events", (req: Request, res: Response) => {
-  const { title, start, end, allowOverlap } = req.body;
-  const duration: Duration = { start: new Date(start), end: new Date(end) };
+  const { title, start, duration, allowOverlap } = req.body;
+  const startDate = new Date(start);
+  const endDate = addDays(startDate, duration);
 
-  if (isEventOverlapping(duration, allowOverlap)) {
-    return res.status(400).send("Event overlaps with another event");
+  const overlapExists = events.some(
+    (event) =>
+      !allowOverlap &&
+      ((startDate < event.duration.end && endDate > event.duration.start) ||
+        (endDate > event.duration.start && startDate < event.duration.end))
+  );
+
+  if (overlapExists) {
+    return res
+      .status(400)
+      .send({ error: "Event overlaps with an existing event." });
   }
 
   const newEvent: CalendarEvent = {
     id: uuid(),
     title,
-    duration,
+    duration: { start: startDate, end: endDate },
   };
 
   events.push(newEvent);
-  res.status(200).send(newEvent);
+  res.status(201).send(newEvent);
 });
+
+export default app;
