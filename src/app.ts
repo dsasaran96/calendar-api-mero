@@ -1,179 +1,201 @@
-import express, { Request, Response } from "express";
+import express from "express";
+import bodyParser from "body-parser";
 import { v4 as uuid } from "uuid";
-import { CalendarEvent } from "./types/Event";
-import { addDays, addWeeks, addMonths } from "date-fns";
+import { DateTime } from "luxon";
+
+interface CalendarEvent {
+  id: string;
+  seriesId?: string;
+  title: string;
+  start: string;
+  duration: number; // minutes
+  recurrenceRule?: RecurrenceRule;
+}
+
+interface RecurrenceRule {
+  frequency: "DAILY" | "WEEKLY" | "MONTHLY";
+  limit: number | string;
+}
 
 const app = express();
-app.use(express.json());
+const port = 3000;
+app.use(bodyParser.json());
 
 let events: CalendarEvent[] = [];
 
-app.post("/events", (req: Request, res: Response) => {
-  const { title, start, duration, frequency, count, until, allowOverlap } =
-    req.body;
-  const seriesId = uuid();
-  let currentDate = new Date(start);
-  const endDateLimit = until ? new Date(until) : null;
-  let occurrences = count || Infinity;
-
-  while (
-    (endDateLimit ? currentDate <= endDateLimit : true) &&
-    occurrences > 0
-  ) {
-    const eventEndDate = addDays(currentDate, duration);
-
-    if (
-      !allowOverlap &&
-      events.some(
-        (event) =>
-          (currentDate < event.duration.end &&
-            eventEndDate > event.duration.start) ||
-          (eventEndDate > event.duration.start &&
-            currentDate < event.duration.end)
-      )
-    ) {
+app.post("/event", (req, res) => {
+  const { start, duration, title, recurrenceRule, allowOverlap } = req.body;
+  const baseCalendarEventId = uuid();
+  const seriesId = recurrenceRule ? uuid() : undefined;
+  if (recurrenceRule) {
+    const occurrences = generateOccurrences(
+      start,
+      duration,
+      title,
+      recurrenceRule,
+      seriesId ?? "",
+      baseCalendarEventId
+    );
+    if (!allowOverlap && checkForOverlap(occurrences)) {
       return res
         .status(400)
-        .send({ error: "Event overlaps with an existing event." });
+        .send({ error: "Event overlaps with existing event" });
     }
-
-    events.push({
-      id: uuid(),
-      title,
-      duration: { start: currentDate, end: eventEndDate },
-      seriesId: frequency ? seriesId : undefined,
-    });
-
-    switch (frequency) {
-      case "DAILY":
-        currentDate = addDays(currentDate, 1);
-        break;
-      case "WEEKLY":
-        currentDate = addWeeks(currentDate, 1);
-        break;
-      case "MONTHLY":
-        currentDate = addMonths(currentDate, 1);
-        break;
-    }
-
-    occurrences--;
-    if (!frequency) break;
-  }
-
-  res.status(201).send({ message: "Event(s) created successfully." });
-});
-
-app.get("/events", (req: Request, res: Response) => {
-  const { start, end } = req.query;
-  let filteredEvents = events;
-
-  if (start || end) {
-    const startDate = start ? new Date(start as string) : new Date(0);
-    const endDate = end ? new Date(end as string) : new Date();
-
-    filteredEvents = events.filter(
-      (event) =>
-        (event.duration.start >= startDate &&
-          event.duration.start <= endDate) ||
-        (event.duration.end >= startDate && event.duration.end <= endDate)
-    );
-  }
-
-  res.json(filteredEvents);
-});
-
-app.put("/events/:id", (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { title, start, duration, frequency, count, until, updateFuture } =
-    req.body;
-
-  const eventIndex = events.findIndex((event) => event.id === id);
-  if (eventIndex === -1) {
-    return res.status(404).send({ error: "Event not found." });
-  }
-
-  const targetEvent = events[eventIndex];
-
-  if (!updateFuture) {
-    const updatedStartDate = new Date(start);
-    const updatedEndDate = addDays(updatedStartDate, duration);
-    events[eventIndex] = {
-      ...targetEvent,
-      title,
-      duration: { start: updatedStartDate, end: updatedEndDate },
-    };
-    return res.json({ message: "Event updated successfully." });
-  }
-
-  if (updateFuture && targetEvent.seriesId) {
-    events = events.filter(
-      (event) =>
-        event.seriesId !== targetEvent.seriesId ||
-        event.duration.start < new Date(start)
-    );
-
-    let occurrences = count || 1;
-    let currentDate = new Date(start);
-    const endDateLimit = until ? new Date(until) : null;
-
-    while (
-      (endDateLimit ? currentDate <= endDateLimit : true) &&
-      occurrences > 0
-    ) {
-      const eventEndDate = addDays(currentDate, duration);
-      events.push({
-        id: uuid(),
-        seriesId: targetEvent.seriesId,
-        title,
-        duration: { start: currentDate, end: eventEndDate },
-      });
-
-      switch (frequency) {
-        case "DAILY":
-          currentDate = addDays(currentDate, 1);
-          break;
-        case "WEEKLY":
-          currentDate = addWeeks(currentDate, 1);
-          break;
-        case "MONTHLY":
-          currentDate = addMonths(currentDate, 1);
-          break;
-        default:
-          break;
-      }
-
-      occurrences--;
-    }
-
-    return res.json({ message: "Future events updated successfully." });
-  }
-
-  return res.status(400).send({ error: "Invalid operation." });
-});
-
-app.delete("/events/:id", (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { deleteFuture } = req.query;
-
-  if (deleteFuture === "true") {
-    const targetEvent = events.find((event) => event.id === id);
-    if (!targetEvent) {
-      return res.status(404).send({ error: "Event not found." });
-    }
-    events = events.filter(
-      (event) =>
-        event.seriesId !== targetEvent.seriesId ||
-        event.duration.start < targetEvent.duration.start
-    );
+    events.push(...occurrences);
   } else {
-    const index = events.findIndex((event) => event.id === id);
-    if (index === -1) {
-      return res.status(404).send({ error: "Event not found." });
+    const event: CalendarEvent = {
+      id: baseCalendarEventId,
+      title,
+      start,
+      duration,
+    };
+    if (allowOverlap !== true && checkForOverlap([event], "")) {
+      return res
+        .status(400)
+        .send({ error: "Event overlaps with existing event" });
     }
-    events.splice(index, 1);
+    events.push(event);
   }
+  res.status(201).send({
+    message: "Event created",
+    id: baseCalendarEventId,
+    seriesId,
+  });
+});
 
+app.get("/events", (req, res) => {
+  const { start, end } = req.query;
+  const filteredCalendarEvents = events.filter((event) => {
+    const eventStart = DateTime.fromISO(event.start);
+    return (
+      eventStart >= DateTime.fromISO(start as string) &&
+      eventStart <= DateTime.fromISO(end as string)
+    );
+  });
+  res.send(filteredCalendarEvents);
+});
+
+app.put("/event/:id", (req, res) => {
+  const { id } = req.params;
+  const { start, duration, title, recurrenceRule, allowOverlap } = req.body;
+  const eventIndex = events.findIndex(
+    (event) => event.id === id || event.seriesId === id
+  );
+  if (eventIndex === -1)
+    return res.status(404).send({ error: "Event not found" });
+  const seriesId = events[eventIndex].seriesId || id;
+  events = events.filter(
+    (event) => event.seriesId !== seriesId && event.id !== id
+  );
+  if (recurrenceRule) {
+    const occurrences = generateOccurrences(
+      start,
+      duration,
+      title,
+      recurrenceRule,
+      seriesId,
+      id
+    );
+    if (!allowOverlap && checkForOverlap(occurrences, seriesId)) {
+      return res
+        .status(400)
+        .send({ error: "Event overlaps with existing event" });
+    }
+    events.push(...occurrences);
+  } else {
+    const updatedCalendarEvent: CalendarEvent = {
+      id,
+      title,
+      start,
+      duration,
+      seriesId: seriesId || undefined,
+    };
+    if (!allowOverlap && checkForOverlap([updatedCalendarEvent], seriesId)) {
+      return res
+        .status(400)
+        .send({ error: "Event overlaps with existing event" });
+    }
+    events.push(updatedCalendarEvent);
+  }
+  res.send({ message: "Event updated", id, seriesId });
+});
+
+app.delete("/event/:id", (req, res) => {
+  const { id } = req.params;
+  events = events.filter((event) => event.id !== id && event.seriesId !== id);
   res.status(204).send();
 });
+
+function generateOccurrences(
+  start: string,
+  duration: number,
+  title: string,
+  recurrenceRule: RecurrenceRule,
+  seriesId: string,
+  baseCalendarEventId: string
+): CalendarEvent[] {
+  const occurrences: CalendarEvent[] = [];
+  const { frequency, limit } = recurrenceRule;
+  const startDate = DateTime.fromISO(start);
+  let currentDate = startDate;
+  let count = typeof limit === "number" ? limit : Infinity;
+  const endDate = typeof limit === "string" ? DateTime.fromISO(limit) : null;
+  while (count > 0 && (!endDate || currentDate <= endDate)) {
+    occurrences.push({
+      id: uuid(),
+      seriesId,
+      title,
+      start: currentDate.toISO() || "",
+      duration,
+      recurrenceRule,
+    });
+    currentDate = addTime(currentDate, frequency);
+    count--;
+  }
+  return occurrences;
+}
+
+function addTime(
+  date: DateTime,
+  frequency: "DAILY" | "WEEKLY" | "MONTHLY"
+): DateTime {
+  switch (frequency) {
+    case "DAILY":
+      return date.plus({ days: 1 });
+    case "WEEKLY":
+      return date.plus({ weeks: 1 });
+    case "MONTHLY":
+      return date.plus({ months: 1 });
+    default:
+      return date;
+  }
+}
+
+function checkForOverlap(
+  eventsToCheck: CalendarEvent[],
+  seriesIdToExclude?: string
+): boolean {
+  return eventsToCheck.some((eventToCheck) => {
+    const startA = DateTime.fromISO(eventToCheck.start);
+    const endA = startA.plus({ minutes: eventToCheck.duration });
+    return events.some((event) => {
+      if (event.seriesId === seriesIdToExclude) return false;
+
+      const startB = DateTime.fromISO(event.start);
+      const endB = startB.plus({ minutes: event.duration });
+
+      console.log(`Comparing: ${startA} - ${endA} with ${startB} - ${endB}`);
+
+      const isOverlap =
+        (startA < endB && startA >= startB) || (endA > startB && endA <= endB);
+
+      return isOverlap;
+    });
+  });
+}
+
+app.listen(port, () =>
+  console.log(`Server listening at http://localhost:${port}`)
+);
 
 export default app;
