@@ -92,4 +92,14 @@ describe("Calendar Domain API", () => {
     });
     expect(response.statusCode).toBe(404);
   });
+
+  it("should delete an event", async () => {
+    const response = await request(app).delete(`/events/${eventId}`);
+    expect(response.statusCode).toBe(204);
+  });
+
+  it("should not find the event to delete", async () => {
+    const response = await request(app).delete("/events/nonexistent-id");
+    expect(response.statusCode).toBe(404);
+  });
 });

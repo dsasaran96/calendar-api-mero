@@ -97,4 +97,16 @@ app.put("/events/:id", (req: Request, res: Response) => {
   res.json(events[eventIndex]);
 });
 
+app.delete("/events/:id", (req: Request, res: Response) => {
+  const { id } = req.params;
+  const eventIndex = events.findIndex((event) => event.id === id);
+
+  if (eventIndex === -1) {
+    return res.status(404).send({ error: "Event not found." });
+  }
+
+  events.splice(eventIndex, 1);
+  res.status(204).send();
+});
+
 export default app;
